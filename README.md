@@ -1,6 +1,4 @@
 
------
-
 ## Post-Call Analytics Data Flow
 
 Our system leverages Apache Pulsar for message queuing, MinIO for audio storage, and various consumers for processing, language detection, Automatic Speech Recognition (ASR), and Large Language Model (LLM) analysis.
@@ -42,8 +40,6 @@ graph TD
     V --> U
 
     U --> W[ClickHouse (Analytics Database)]
-```
-
 -----
 
 ### Flow Description
