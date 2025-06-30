@@ -9,33 +9,36 @@ This repository outlines the architecture and data flow for our post-call analyt
 
 This diagram visualizes the end-to-end data pipeline, illustrating how data flows through various components, including Apache Pulsar topics, MinIO storage, and specialized processing modules.
 
+## System Architecture Diagram
+
 ```mermaid
-graph TD
-    A[FreeSWITCH Server (CDR Source)] --> B[Pulsar Topic: speechriv-insight-record]
-    B --> C[Consumer: Record Processor (Uploads to MinIO)]
-    C --> D[MinIO (Audio File Storage)]
-    C --> E[Pulsar Topic: speechriv-insight-localaudio]
-    E --> F[AI LAN Record Machine (Consumer)]
+flowchart TD
+    A[FreeSWITCH CDR] --> B[speechriv-insight-record]
+    B --> C[Record Processor]
+    C --> D[MinIO Storage]
+    C --> E[speechriv-insight-localaudio]
+    E --> F[AI LAN Record Machine]
     F --> G[Download Audio from MinIO]
-    G --> H[Pulsar Topic: speechriv-insight-audioprocess]
-    H --> I[Consumer: Audio Processor (Splits Stereo, Language Detection)]
-    I -- Check speechriv_lang variable --> J{speechriv_lang Variable Present?}
-    J -- No --> K[Pulsar Topic: speechriv-insight-lang (Language Detection)]
+    G --> H[speechriv-insight-audioprocess]
+    H --> I[Audio Processor]
+    I --> J{speechriv_lang present?}
+    J -- No --> K[speechriv-insight-lang]
     K --> L[Language Detector]
     L --> M{Detected Language}
     J -- Yes --> M
-    M -- English --> N[Pulsar Topic: speechriv-insight-eng-asr (English ASR)]
-    M -- Other Language --> O[Pulsar Topic: speechriv-insight-multi-asr (Multi-language ASR)]
-    N --> P[Consumer: English ASR Transcriber]
-    P --> Q[Pulsar Topic: speechriv-insight-eng-llm (English LLM)]
-    O --> R[Consumer: Multi-language ASR Transcriber]
-    R --> S[Pulsar Topic: speechriv-insight-multi-llm (Multi-language LLM)]
-    Q --> T[Consumer: English LLM (Completes Task)]
-    T --> U[Pulsar Topic: speechriv-insight-clickhouse]
-    S --> V[Consumer: Multi-language LLM (Completes Task)]
-    V --> U
-    U --> W[ClickHouse (Analytics Database)]
+    M -- English --> N[speechriv-insight-eng-asr]
+    M -- Other --> O[speechriv-insight-multi-asr]
+    N --> P[English ASR Transcriber]
+    P --> Q[speechriv-insight-eng-llm]
+    O --> R[Multi-lang ASR Transcriber]
+    R --> S[speechriv-insight-multi-llm]
+    Q --> T[English LLM]
+    S --> U[Multi-lang LLM]
+    T --> V[speechriv-insight-clickhouse]
+    U --> V
+    V --> W[ClickHouse]
 ```
+
 
 -----
 
