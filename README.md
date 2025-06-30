@@ -1,46 +1,5 @@
 
-## Post-Call Analytics Data Flow
 
-Our system leverages Apache Pulsar for message queuing, MinIO for audio storage, and various consumers for processing, language detection, Automatic Speech Recognition (ASR), and Large Language Model (LLM) analysis.
-
-```mermaid
-graph TD
-    A[FreeSWITCH Server (CDR Source)] --> B[Pulsar Topic: speechriv-insight-record]
-
-    B --> C[Consumer: Record Processor (Uploads to MinIO)]
-    C --> D[MinIO (Audio File Storage)]
-    C --> E[Pulsar Topic: speechriv-insight-localaudio]
-
-    E --> F[AI LAN Record Machine (Consumer)]
-    F --> G[Download Audio from MinIO]
-    G --> H[Pulsar Topic: speechriv-insight-audioprocess]
-
-    H --> I[Consumer: Audio Processor (Splits Stereo, Language Detection)]
-    I -- Check speechriv_lang variable --> J{speechriv_lang Variable Present?}
-
-    J -- No --> K[Pulsar Topic: speechriv-insight-lang (Language Detection)]
-    K --> L[Language Detector]
-    L --> M{Detected Language}
-
-    J -- Yes --> M
-
-    M -- English --> N[Pulsar Topic: speechriv-insight-eng-asr (English ASR)]
-    M -- Other Language --> O[Pulsar Topic: speechriv-insight-multi-asr (Multi-language ASR)]
-
-    N --> P[Consumer: English ASR Transcriber]
-    P --> Q[Pulsar Topic: speechriv-insight-eng-llm (English LLM)]
-
-    O --> R[Consumer: Multi-language ASR Transcriber]
-    R --> S[Pulsar Topic: speechriv-insight-multi-llm (Multi-language LLM)]
-
-    Q --> T[Consumer: English LLM (Completes Task)]
-    T --> U[Pulsar Topic: speechriv-insight-clickhouse]
-
-    S --> V[Consumer: Multi-language LLM (Completes Task)]
-    V --> U
-
-    U --> W[ClickHouse (Analytics Database)]
------
 
 ### Flow Description
 
