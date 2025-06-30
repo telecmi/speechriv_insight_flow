@@ -1,47 +1,76 @@
 
+# Post-Call Analytics System
 
+This repository outlines the architecture and data flow for our post-call analytics system. We aim to transform raw Call Detail Records (CDRs) and associated audio into actionable insights, stored and analyzed in ClickHouse.
 
-### Flow Description
+---
 
-1.  **CDR Ingestion:**
+## System Architecture Diagram
 
-      * **FreeSWITCH Server (CDR Source):** Generates Call Detail Records (CDRs) along with associated audio files.
-      * **Pulsar Topic: `speechriv-insight-record`:** Receives the raw CDRs from FreeSWITCH.
+This diagram visualizes the end-to-end data pipeline, illustrating how data flows through various components, including Apache Pulsar topics, MinIO storage, and specialized processing modules.
 
-2.  **Audio Storage & Initial Routing:**
+```mermaid
+graph TD
+    A[FreeSWITCH Server (CDR Source)] --> B[Pulsar Topic: speechriv-insight-record]
+    B --> C[Consumer: Record Processor (Uploads to MinIO)]
+    C --> D[MinIO (Audio File Storage)]
+    C --> E[Pulsar Topic: speechriv-insight-localaudio]
+    E --> F[AI LAN Record Machine (Consumer)]
+    F --> G[Download Audio from MinIO]
+    G --> H[Pulsar Topic: speechriv-insight-audioprocess]
+    H --> I[Consumer: Audio Processor (Splits Stereo, Language Detection)]
+    I -- Check speechriv_lang variable --> J{speechriv_lang Variable Present?}
+    J -- No --> K[Pulsar Topic: speechriv-insight-lang (Language Detection)]
+    K --> L[Language Detector]
+    L --> M{Detected Language}
+    J -- Yes --> M
+    M -- English --> N[Pulsar Topic: speechriv-insight-eng-asr (English ASR)]
+    M -- Other Language --> O[Pulsar Topic: speechriv-insight-multi-asr (Multi-language ASR)]
+    N --> P[Consumer: English ASR Transcriber]
+    P --> Q[Pulsar Topic: speechriv-insight-eng-llm (English LLM)]
+    O --> R[Consumer: Multi-language ASR Transcriber]
+    R --> S[Pulsar Topic: speechriv-insight-multi-llm (Multi-language LLM)]
+    Q --> T[Consumer: English LLM (Completes Task)]
+    T --> U[Pulsar Topic: speechriv-insight-clickhouse]
+    S --> V[Consumer: Multi-language LLM (Completes Task)]
+    V --> U
+    U --> W[ClickHouse (Analytics Database)]
+```
 
-      * **Consumer: Record Processor:** Consumes messages from `speechriv-insight-record`. It processes the CDRs, **uploads the audio files to MinIO**, and then publishes messages (which include the MinIO audio path) to the `speechriv-insight-localaudio` topic.
-      * **MinIO (Audio File Storage):** Serves as the central repository for all raw audio recordings.
-      * **Pulsar Topic: `speechriv-insight-localaudio`:** Acts as a bridge, carrying audio file references to the AI LAN Record Machine, which might reside in a separate network.
+-----
 
-3.  **Audio Processing & Language Detection:**
+## Data Flow Description
 
-      * **AI LAN Record Machine (Consumer):** This machine, potentially in an isolated network, consumes messages from `speechriv-insight-localaudio`. It's responsible for **downloading the audio from MinIO**.
-      * **Pulsar Topic: `speechriv-insight-audioprocess`:** The downloaded audio data is forwarded to this topic for further processing.
-      * **Consumer: Audio Processor:** Consumes from `speechriv-insight-audioprocess`. It performs two key functions:
-          * **Splits stereo audio** into mono channels if required.
-          * **Checks for a `speechriv_lang` variable** within the data.
-      * **Language Determination:**
-          * If `speechriv_lang` is **not present**, the audio is sent to **Pulsar Topic: `speechriv-insight-lang`** for automatic language detection by the **Language Detector** consumer.
-          * If `speechriv_lang` **is present**, its value directly determines the next step, bypassing explicit language detection.
+Our post-call analytics system is designed with a modular and scalable architecture, primarily leveraging Apache Pulsar for efficient message passing between services.
 
-4.  **Automatic Speech Recognition (ASR):**
+1. ### CDR Ingestion
+    - **FreeSWITCH Server (CDR Source):** Generates CDRs and audio.
+    - **Pulsar Topic: `speechriv-insight-record`:** Entry point for raw CDRs.
 
-      * **Pulsar Topic: `speechriv-insight-eng-asr` (English ASR):** If the language is determined to be English, audio is routed here.
-      * **Pulsar Topic: `speechriv-insight-multi-asr` (Multi-language ASR):** If the language is not English, audio is routed here.
-      * **Consumer: English ASR Transcriber:** Consumes from `speechriv-insight-eng-asr` and transcribes the English audio into text.
-      * **Consumer: Multi-language ASR Transcriber:** Consumes from `speechriv-insight-multi-asr` and transcribes the multi-language audio into text.
+2. ### Audio Storage and Initial Routing
+    - **Record Processor:** Uploads audio to MinIO and forwards reference to `speechriv-insight-localaudio`.
+    - **MinIO:** Stores all raw audio files.
+    - **Pulsar Topic: `speechriv-insight-localaudio`:** Broadcasts MinIO reference to the AI LAN machine.
 
-5.  **Large Language Model (LLM) Processing:**
+3. ### Audio Processing and Language Detection
+    - **AI LAN Record Machine:** Downloads audio from MinIO.
+    - **Pulsar Topic: `speechriv-insight-audioprocess`:** Sends audio for processing.
+    - **Audio Processor:** Splits stereo, checks or sets `speechriv_lang`.
+    - **Language Detector:** If lang missing, consumes from `speechriv-insight-lang`.
 
-      * **Pulsar Topic: `speechriv-insight-eng-llm` (English LLM):** The transcribed English text is sent here for analysis by an English Large Language Model.
-      * **Pulsar Topic: `speechriv-insight-multi-llm` (Multi-language LLM):** The transcribed multi-language text is sent here for analysis by a multi-language Large Language Model.
-      * **Consumer: English LLM (Completes Task):** Consumes from `speechriv-insight-eng-llm`, performing tasks like sentiment analysis, entity extraction, summarization, etc.
-      * **Consumer: Multi-language LLM (Completes Task):** Consumes from `speechriv-insight-multi-llm`, performing similar tasks for other languages.
+4. ### Automatic Speech Recognition (ASR)
+    - **English ASR → `speechriv-insight-eng-asr`**
+    - **Multilang ASR → `speechriv-insight-multi-asr`**
+    - Transcribers produce to LLM-specific topics.
 
-6.  **Data Storage:**
+5. ### Large Language Model (LLM) Processing
+    - **English LLM → `speechriv-insight-eng-llm`**
+    - **Multi-lang LLM → `speechriv-insight-multi-llm`**
+    - Outputs go to `speechriv-insight-clickhouse`.
 
-      * **Pulsar Topic: `speechriv-insight-clickhouse`:** Both English and Multi-language LLM consumers send their final, processed analytical data to this topic.
-      * **ClickHouse (Analytics Database):** The ultimate destination for all processed call analytics data, optimized for fast queries and reporting.
+6. ### Final Storage
+    - **ClickHouse:** Fast analytics-ready database for structured insights.
 
-This comprehensive flow ensures that all call recordings are processed, analyzed, and made available for valuable insights.
+-----
+
+This detailed flow ensures efficient, secure, and scalable transformation of call recordings into structured, searchable insights.
