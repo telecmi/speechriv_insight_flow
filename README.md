@@ -1,4 +1,3 @@
-This document outlines the end-to-end data flow for our post-call analytics system, from receiving Call Detail Records (CDRs) to storing processed insights in ClickHouse.
 
 -----
 
